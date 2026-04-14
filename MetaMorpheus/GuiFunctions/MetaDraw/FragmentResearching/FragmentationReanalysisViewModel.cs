@@ -81,10 +81,46 @@ namespace GuiFunctions
         public ObservableCollection<FragmentViewModel> PossibleProducts
         {
             get => _possibleProducts;
-            set { _possibleProducts = value; OnPropertyChanged(nameof(PossibleProducts)); }
+            set
+            {
+                if (_possibleProducts != null)
+                    _possibleProducts.CollectionChanged -= OnPossibleProductsChanged;
+                _possibleProducts = value;
+                OnPropertyChanged(nameof(PossibleProducts));
+                if (_possibleProducts != null)
+                {
+                    _possibleProducts.CollectionChanged += OnPossibleProductsChanged;
+                    RefreshProductsToUseCache();
+                }
+            }
         }
 
-        private IEnumerable<ProductType> _productsToUse => PossibleProducts.Where(p => p.Use).Select(p => p.ProductType);
+        // Pre-built snapshot so MatchIonsWithNewTypes never enumerates the live collection
+        // from a background thread while the UI thread is calling Add/Remove on it.
+        private volatile List<ProductType> _cachedProductsToUse = new();
+
+        private void OnPossibleProductsChanged(object sender,
+            System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+            => RefreshProductsToUseCache();
+
+        private void RefreshProductsToUseCache()
+        {
+            try
+            {
+                _cachedProductsToUse = _possibleProducts
+                    .Where(p => p.Use)
+                    .Select(p => p.ProductType)
+                    .ToList();
+            }
+            catch (InvalidOperationException)
+            {
+                // PossibleProducts was concurrently modified during the rebuild;
+                // the previous cache remains valid until the next CollectionChanged fires.
+            }
+        }
+
+        // Returns the pre-built, thread-safe snapshot — never enumerates the live collection.
+        private IEnumerable<ProductType> _productsToUse => _cachedProductsToUse;
 
         private bool _persist;
         public bool Persist
