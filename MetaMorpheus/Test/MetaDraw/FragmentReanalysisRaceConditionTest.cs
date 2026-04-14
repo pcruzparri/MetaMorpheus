@@ -50,15 +50,14 @@ namespace Test.MetaDraw
             var token = cts.Token;
             Exception caughtException = null;
 
-            // Background task that modifies PossibleProducts collection
+            // Modifier spins as fast as possible — no sleep — to maximise the chance of
+            // colliding with the enumerator inside MatchIonsWithNewTypes.
             var modifierTask = Task.Run(() =>
             {
+                var dummy = new FragmentViewModel(false, ProductType.Y);
                 while (!token.IsCancellationRequested)
                 {
-                    // Add a dummy product
-                    var dummy = new FragmentViewModel(false, ProductType.Y);
                     viewModel.PossibleProducts.Add(dummy);
-                    Thread.Sleep(1); // small delay
                     viewModel.PossibleProducts.Remove(dummy);
                 }
             }, token);
@@ -81,14 +80,19 @@ namespace Test.MetaDraw
                 }
             }, token);
 
-            // Wait for matcher to finish (or cancel)
-            matcherTask.Wait(TimeSpan.FromSeconds(10));
-            cts.Cancel();
-            // Wait for modifier to finish (should exit loop)
-            modifierTask.Wait(TimeSpan.FromSeconds(2));
-
-            // Clean up
-            Directory.Delete(outputFolder, true);
+            try
+            {
+                // Wait for matcher to finish (or cancel on first exception)
+                matcherTask.Wait(TimeSpan.FromSeconds(10));
+                cts.Cancel();
+                // Wait for modifier to exit its loop
+                modifierTask.Wait(TimeSpan.FromSeconds(2));
+            }
+            finally
+            {
+                // Always clean up, even if the assertion below fails
+                Directory.Delete(outputFolder, true);
+            }
 
             // If an InvalidOperationException was thrown, fail the test
             Assert.That(caughtException, Is.Null, $"InvalidOperationException thrown: {caughtException?.Message}");
